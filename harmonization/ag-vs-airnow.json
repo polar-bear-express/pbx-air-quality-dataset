@@ -1,0 +1,127 @@
+{
+  "fit_run_at": "2026-05-16T16:51:00.019862Z",
+  "reference": "AirNow (regulatory BAM/FEM)",
+  "compared": "AirGradient (Plantower PMS5003 optical)",
+  "per_region": {
+    "TOR": {
+      "n_hours": 17020,
+      "airnow_mean": 8.04,
+      "airgradient_mean": 6.59,
+      "pearson_r": 0.469,
+      "ols_slope_ag_on_airnow": 0.953,
+      "ols_intercept": -1.079,
+      "rmse": 14.11,
+      "harmonization_ag_to_airnow": {
+        "multiplier": 1.05,
+        "offset": 1.133,
+        "formula": "AN_equiv \u2248 AG \u00d7 1.050 + 1.133"
+      },
+      "residual_by_airnow_bucket": {
+        "0-1": {
+          "n": 10,
+          "mean_residual_ag_minus_airnow": 3.02
+        },
+        "1-2": {
+          "n": 386,
+          "mean_residual_ag_minus_airnow": 2.3
+        },
+        "2-5": {
+          "n": 6296,
+          "mean_residual_ag_minus_airnow": -0.75
+        },
+        "5-10": {
+          "n": 6043,
+          "mean_residual_ag_minus_airnow": -2.43
+        },
+        "10-20": {
+          "n": 3442,
+          "mean_residual_ag_minus_airnow": -1.98
+        },
+        "20-inf": {
+          "n": 843,
+          "mean_residual_ag_minus_airnow": 0.46
+        }
+      }
+    },
+    "NYC": {
+      "n_hours": 18267,
+      "airnow_mean": 7.24,
+      "airgradient_mean": 9.25,
+      "pearson_r": 0.914,
+      "ols_slope_ag_on_airnow": 1.696,
+      "ols_intercept": -3.028,
+      "rmse": 3.67,
+      "harmonization_ag_to_airnow": {
+        "multiplier": 0.59,
+        "offset": 1.785,
+        "formula": "AN_equiv \u2248 AG \u00d7 0.590 + 1.785"
+      },
+      "residual_by_airnow_bucket": {
+        "0-1": {
+          "n": 17,
+          "mean_residual_ag_minus_airnow": -0.29
+        },
+        "1-2": {
+          "n": 358,
+          "mean_residual_ag_minus_airnow": -0.81
+        },
+        "2-5": {
+          "n": 6884,
+          "mean_residual_ag_minus_airnow": -0.54
+        },
+        "5-10": {
+          "n": 7045,
+          "mean_residual_ag_minus_airnow": 1.33
+        },
+        "10-20": {
+          "n": 3587,
+          "mean_residual_ag_minus_airnow": 7.37
+        },
+        "20-inf": {
+          "n": 376,
+          "mean_residual_ag_minus_airnow": 13.32
+        }
+      }
+    },
+    "CHI": {
+      "n_hours": 19732,
+      "airnow_mean": 8.79,
+      "airgradient_mean": 11.96,
+      "pearson_r": 0.846,
+      "ols_slope_ag_on_airnow": 1.477,
+      "ols_intercept": -1.023,
+      "rmse": 6.56,
+      "harmonization_ag_to_airnow": {
+        "multiplier": 0.677,
+        "offset": 0.692,
+        "formula": "AN_equiv \u2248 AG \u00d7 0.677 + 0.692"
+      },
+      "residual_by_airnow_bucket": {
+        "0-1": {
+          "n": 9,
+          "mean_residual_ag_minus_airnow": -0.73
+        },
+        "1-2": {
+          "n": 258,
+          "mean_residual_ag_minus_airnow": -0.61
+        },
+        "2-5": {
+          "n": 5487,
+          "mean_residual_ag_minus_airnow": -0.71
+        },
+        "5-10": {
+          "n": 8235,
+          "mean_residual_ag_minus_airnow": 2.04
+        },
+        "10-20": {
+          "n": 4728,
+          "mean_residual_ag_minus_airnow": 7.95
+        },
+        "20-inf": {
+          "n": 1015,
+          "mean_residual_ag_minus_airnow": 12.12
+        }
+      }
+    }
+  }
+}
