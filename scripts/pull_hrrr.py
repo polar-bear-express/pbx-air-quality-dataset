@@ -7,10 +7,12 @@ byte-range subsetting so only the six fields we need are downloaded, not the
 full ~120 MB file -- then extracts the nearest-grid-point value of each field
 at every monitor location in manifest.csv.
 
-It works one day at a time: the 24 hours of a day are fetched in parallel,
-written to one gzipped CSV per city, and the downloaded GRIB chunks are then
-deleted. Peak disk stays in the megabytes no matter how long the backfill is.
-Days whose city files already exist are skipped, so an interrupted run resumes.
+It works one day at a time: the 24 hours of a day are fetched in parallel by a
+pool of worker *processes* (not threads -- GRIB decoding is CPU-bound and the
+GIL would otherwise serialize it), written to one gzipped CSV per city, and the
+downloaded GRIB chunks are then deleted. Peak disk stays in the megabytes no
+matter how long the backfill is. Days whose city files already exist are
+skipped, so an interrupted run resumes where it left off.
 
 Output: one gzipped CSV per city per day at
 
@@ -33,18 +35,28 @@ Usage:
   python3 scripts/pull_hrrr.py                                  # last 7 days
   python3 scripts/pull_hrrr.py --days 30
   python3 scripts/pull_hrrr.py --start 2018-01-01 --end 2026-05-18
-  python3 scripts/pull_hrrr.py --start 2018-01-01 --end 2026-05-18 --workers 16
+  python3 scripts/pull_hrrr.py --start 2018-01-01 --end 2026-05-18 --workers 14
 
 Requires: herbie-data, xarray, cfgrib, numpy, pandas  (pip install herbie-data)
 """
 from __future__ import annotations
+
+import os
+
+# Cap each worker process to a single math-library thread. With 14 worker
+# processes, numpy/BLAS otherwise spawns a thread-per-core *inside each*,
+# oversubscribing the CPU by ~10x and thrashing. Must be set before numpy
+# is imported -- which, under the 'spawn' start method, also covers workers.
+for _v in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS',
+           'VECLIB_MAXIMUM_THREADS', 'NUMEXPR_NUM_THREADS'):
+    os.environ.setdefault(_v, '1')
 
 import argparse
 import datetime as dt
 import gzip
 import shutil
 import sys
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -64,8 +76,7 @@ SEARCH = '|'.join((
     ':RH:2 m above ground:anl',
     ':PRES:surface:anl',
 ))
-# cfgrib short name -> our output column (covers the naming variants cfgrib
-# emits for these HRRR fields).
+# cfgrib short name -> our output column.
 VARMAP = {
     'hpbl': 'met_pblh', 'blh': 'met_pblh',
     'u10': 'met_wind_u', '10u': 'met_wind_u',
@@ -77,6 +88,17 @@ VARMAP = {
 FIELD_COLS = ('met_pblh', 'met_wind_u', 'met_wind_v',
               'met_temp', 'met_rh', 'met_pressure')
 OUT_COLS = ['location_id', 'datetime', 'lat', 'lon', *FIELD_COLS]
+
+# Worker-process globals, populated once per process by _pool_init.
+_SENSORS: pd.DataFrame | None = None
+_IDX: list | None = None
+
+
+def _pool_init(sensors: pd.DataFrame, idx: list) -> None:
+    """ProcessPoolExecutor initializer: stash the static sensor table and grid
+    index in each worker once, so fetch_hour can read them as globals."""
+    global _SENSORS, _IDX
+    _SENSORS, _IDX = sensors, idx
 
 
 def load_sensors() -> pd.DataFrame:
@@ -122,7 +144,7 @@ def build_grid_index(sensors: pd.DataFrame, end: dt.datetime) -> list:
             minute=0, second=0, microsecond=0)
         try:
             H = Herbie(ref.strftime('%Y-%m-%d %H:00'), model='hrrr',
-                       product='sfc', fxx=0, verbose=False)
+                       product='sfc', fxx=0, priority='aws', verbose=False)
             ds = H.xarray(':HPBL:surface:anl', verbose=False)
             if isinstance(ds, list):
                 ds = ds[0]
@@ -134,14 +156,15 @@ def build_grid_index(sensors: pd.DataFrame, end: dt.datetime) -> list:
     sys.exit('could not fetch a reference HRRR file to build the grid index.')
 
 
-def fetch_hour(when: dt.datetime, sensors: pd.DataFrame,
-               idx: list) -> pd.DataFrame | None:
-    """All six fields at every sensor for one UTC hour, or None if unavailable."""
+def fetch_hour(when: dt.datetime) -> pd.DataFrame | None:
+    """All six fields at every sensor for one UTC hour, or None if unavailable.
+    Runs in a worker process; reads the sensor table + grid index from globals."""
     from herbie import Herbie
+    sensors, idx = _SENSORS, _IDX
     out = {c: np.full(len(sensors), np.nan) for c in FIELD_COLS}
     try:
         H = Herbie(when.strftime('%Y-%m-%d %H:00'), model='hrrr',
-                   product='sfc', fxx=0, verbose=False)
+                   product='sfc', fxx=0, priority='aws', verbose=False)
         result = H.xarray(SEARCH, verbose=False)
         datasets = result if isinstance(result, list) else [result]
         for ds in datasets:
@@ -192,8 +215,8 @@ def main() -> None:
                     help='pull the most recent N days (default 7)')
     ap.add_argument('--start', help='window start YYYY-MM-DD (overrides --days)')
     ap.add_argument('--end', help='window end YYYY-MM-DD (default: now)')
-    ap.add_argument('--workers', type=int, default=16,
-                    help='parallel hour fetches (default 16)')
+    ap.add_argument('--workers', type=int, default=14,
+                    help='parallel worker processes (default 14)')
     args = ap.parse_args()
 
     end = (dt.datetime.strptime(args.end, '%Y-%m-%d') if args.end
@@ -208,32 +231,37 @@ def main() -> None:
           f'{args.workers} workers', flush=True)
 
     idx = build_grid_index(sensors, end)
-    print('grid index built; starting day-by-day pull', flush=True)
+    print(f'grid index built; starting day-by-day pull ({args.workers} processes)',
+          flush=True)
 
     n_days = (end.date() - start.date()).days + 1
     written = skipped = empty = 0
-    for d in range(n_days):
-        day = start.date() + dt.timedelta(days=d)
-        day_str = day.strftime('%Y%m%d')
-        if all((MET / c / f'{day_str}.csv.gz').exists() for c in cities):
-            skipped += 1
-        else:
-            hours = [dt.datetime(day.year, day.month, day.day, h)
-                     for h in range(24)
-                     if start <= dt.datetime(day.year, day.month, day.day, h) <= end]
-            with ThreadPoolExecutor(max_workers=args.workers) as ex:
-                frames = [f for f in ex.map(
-                    lambda w: fetch_hour(w, sensors, idx), hours) if f is not None]
-            if frames:
-                write_day(day_str, pd.concat(frames, ignore_index=True), sensors)
-                written += 1
+    # One persistent process pool for the whole run -- workers spawn once.
+    pool = ProcessPoolExecutor(max_workers=args.workers,
+                               initializer=_pool_init, initargs=(sensors, idx))
+    try:
+        for d in range(n_days):
+            day = start.date() + dt.timedelta(days=d)
+            day_str = day.strftime('%Y%m%d')
+            if all((MET / c / f'{day_str}.csv.gz').exists() for c in cities):
+                skipped += 1
             else:
-                empty += 1
-        shutil.rmtree(CACHE / day_str, ignore_errors=True)  # belt-and-suspenders
-        seen = written + skipped + empty
-        if seen % 10 == 0 or d == n_days - 1:
-            print(f'    {day_str}: {written} written, {skipped} skipped, '
-                  f'{empty} empty, {n_days - seen} remaining', flush=True)
+                hours = [dt.datetime(day.year, day.month, day.day, h)
+                         for h in range(24)
+                         if start <= dt.datetime(day.year, day.month, day.day, h) <= end]
+                frames = [f for f in pool.map(fetch_hour, hours) if f is not None]
+                if frames:
+                    write_day(day_str, pd.concat(frames, ignore_index=True), sensors)
+                    written += 1
+                else:
+                    empty += 1
+            shutil.rmtree(CACHE / day_str, ignore_errors=True)  # belt-and-suspenders
+            seen = written + skipped + empty
+            if seen % 10 == 0 or d == n_days - 1:
+                print(f'    {day_str}: {written} written, {skipped} skipped, '
+                      f'{empty} empty, {n_days - seen} remaining', flush=True)
+    finally:
+        pool.shutdown()
     print(f'done: {written} day-batches written, {skipped} skipped, '
           f'{empty} empty (no HRRR data)', flush=True)
 
