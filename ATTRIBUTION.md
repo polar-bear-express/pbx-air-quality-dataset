@@ -1,6 +1,8 @@
 # Data Attribution
 
-This dataset is aggregated from multiple sources via [OpenAQ](https://openaq.org/), each under its own license.
+This dataset is aggregated from multiple sources, each under its own license:
+air-quality observations via [OpenAQ](https://openaq.org/), and meteorology from
+the [NOAA HRRR](https://rapidrefresh.noaa.gov/hrrr/) model.
 
 ## Disclaimer
 
@@ -8,7 +10,7 @@ AirNow observations (U.S. EPA / Environment Canada) are **preliminary
 and not fully verified or validated** — they are subject to change. This
 dataset is for **research and modeling only**; it is **not** for
 regulatory, legal, health, or safety decisions. The U.S. EPA, the AirNow
-program, Environment Canada, AirGradient, and OpenAQ do **not** endorse
+program, Environment Canada, NOAA, AirGradient, and OpenAQ do **not** endorse
 this dataset or any product derived from it. Provided "as is", without
 warranty. Source data values are redistributed unaltered.
 
@@ -19,6 +21,8 @@ When using this dataset, the following attribution must appear in any derived pr
 > Data provided by **AirGradient** (https://www.airgradient.com/) via **OpenAQ** (https://openaq.org/), licensed under Creative Commons Attribution 4.0 International (CC-BY 4.0) — https://creativecommons.org/licenses/by/4.0/
 >
 > Regulatory data: **U.S. EPA AirNow** (https://www.airnow.gov/) — U.S. federal public domain. **Environment Canada** (https://weather.gc.ca/) — Open Government Licence Canada 2.0 — https://open.canada.ca/en/open-government-licence-canada
+>
+> Meteorology: **NOAA HRRR** (https://rapidrefresh.noaa.gov/hrrr/) — U.S. federal public domain.
 
 ## Sources
 
@@ -42,6 +46,13 @@ When using this dataset, the following attribution must appear in any derived pr
 - **Hardware**: Plantower PMS5003-series optical particle counter, AirGradient O-1PP outdoor model
 - **Note**: Data accessed directly via AirGradient's own API or Map is licensed CC-BY-SA 4.0 (more restrictive). This dataset was pulled via OpenAQ's S3 archive, so the lighter CC-BY 4.0 terms apply.
 - More info: https://www.airgradient.com/
+
+### NOAA HRRR (meteorology)
+- **Coverage**: hourly boundary-layer height, 10 m wind, 2 m temperature/humidity, and surface pressure, extracted at each monitor location from the High-Resolution Rapid Refresh 3 km CONUS surface analysis
+- **License**: U.S. federal **public domain** (works of the U.S. Government carry no copyright)
+- **Attribution**: Not legally required; courtesy citation appreciated
+- **Source**: NOAA/NCEP, accessed via the AWS Open Data registry mirror (`s3://noaa-hrrr-bdp-pds/`)
+- More info: https://rapidrefresh.noaa.gov/hrrr/, https://registry.opendata.aws/noaa-hrrr-pds/
 
 ### OpenAQ (aggregator + delivery)
 - **Role**: Mirrors all upstream providers and exposes them through a unified API + S3 archive
