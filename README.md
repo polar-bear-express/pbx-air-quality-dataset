@@ -4,6 +4,37 @@ Hourly PM2.5 readings for **Toronto, New York City, and Chicago**, aggregated fr
 
 Built for training short-horizon air-quality prediction models. Released under CC-BY-4.0; see [ATTRIBUTION.md](./ATTRIBUTION.md) for required upstream credits.
 
+Maintained by Polar Bear Express.
+
+## Reproducible — verify it yourself
+
+This is the trust anchor for the dataset: **nothing here is hand-curated or fabricated.** Every reading is rebuilt from public, independently accessible sources by the scripts checked into this repo. You can re-run them yourself and confirm the output matches, byte for byte, what is committed.
+
+The raw measurements come from two public archives:
+
+- **OpenAQ S3 archive** (`https://openaq-data-archive.s3.amazonaws.com/`) — the keyless public mirror that hosts the daily PM2.5 CSVs.
+- **OpenAQ v3 API** (`https://api.openaq.org/v3`) — used only to discover which sensor locations are active in each city's bounding box (a free API key, available at <https://explore.openaq.org/register>, is needed for this discovery step).
+
+The pipeline is four real scripts, each doing exactly one job:
+
+| Script | What it does |
+|---|---|
+| [`scripts/pull.py`](./scripts/pull.py) | Discovers active AirNow + AirGradient sensors in the TOR/NYC/CHI bounding boxes via the OpenAQ v3 API, then downloads every daily PM2.5 CSV from the OpenAQ S3 archive into `data/hourly/`. Idempotent — skips files already present at the same size — and rebuilds `manifest.csv` from what is on disk. |
+| [`scripts/consolidate.py`](./scripts/consolidate.py) | Reads all ~60k daily gzipped CSVs and writes one typed, datetime-sorted, snappy-compressed Parquet file per city per provider into `data/parquet/`. |
+| [`scripts/correlate.py`](./scripts/correlate.py) | Fits per-city OLS regressions between AirGradient and AirNow hourly medians and writes the coefficients, Pearson r, RMSE, and per-concentration-bucket residuals to `harmonization/ag-vs-airnow.json`. |
+| [`scripts/load.py`](./scripts/load.py) | Convenience loader: one-line `pd.read_parquet` of a city/provider slice plus a baseline hourly aggregation example. |
+
+To re-derive the whole dataset from scratch:
+
+```bash
+export OPENAQ_API_KEY=...        # free at https://explore.openaq.org/register
+python3 scripts/pull.py          # rebuilds data/hourly/ + manifest.csv from public sources
+python3 scripts/consolidate.py   # rebuilds data/parquet/ from data/hourly/
+python3 scripts/correlate.py     # rebuilds harmonization/ag-vs-airnow.json
+```
+
+Because the upstream archives are public and the scripts are short and dependency-light, anyone can independently reproduce this dataset and confirm it was not altered or invented.
+
 ## What's in here
 
 | Source | Hardware | Sensors (TOR/NYC/CHI) | Earliest data |
@@ -29,7 +60,35 @@ location_id,sensors_id,location,datetime,lat,lon,parameter,units,value
 
 `datetime` is ISO-8601 with the sensor's local timezone offset. `parameter` is always `pm25`. `value` is μg/m³.
 
-## Quick start
+## Quick start (Parquet) — recommended
+
+The raw data is ~60k tiny gzipped daily CSVs, which is slow to load. For
+convenience, [`scripts/consolidate.py`](./scripts/consolidate.py) packs them
+into one Parquet file per city per provider under `data/parquet/`. These six
+files are committed to the repo (~18 MB total), so you can load instantly:
+
+```python
+import pandas as pd
+
+# One-line load of a full city/provider slice (typed, datetime in UTC)
+df = pd.read_parquet('data/parquet/NYC_airnow.parquet')
+
+# Baseline: hourly city-wide median PM2.5 across all sensors
+hourly = (df.set_index('datetime')
+            .groupby(pd.Grouper(freq='1h'))['value']
+            .median())
+```
+
+Available files: `TOR_airnow.parquet`, `TOR_airgradient.parquet`,
+`NYC_airnow.parquet`, `NYC_airgradient.parquet`, `CHI_airnow.parquet`,
+`CHI_airgradient.parquet`.
+
+[`scripts/load.py`](./scripts/load.py) wraps this load and prints a baseline
+aggregation: `python3 scripts/load.py CHI airgradient`. If the Parquet files
+are missing locally, regenerate them with `python3 scripts/consolidate.py`
+(requires `pandas` and `pyarrow`).
+
+## Quick start (raw CSVs)
 
 ```python
 import pandas as pd, glob
