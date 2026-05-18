@@ -139,6 +139,17 @@ Re-run as needed. The script skips files already present at the same size.
 5. **Occasional sensor malfunctions** (e.g., AirGradient values >500 μg/m³ in clean air) — `scripts/correlate.py` filters >500 μg/m³ by default; you may want stricter limits.
 6. **No row-level contributor attribution** — OpenAQ strips AirGradient's `publicContributorName` field in the S3 export. Network-level attribution to AirGradient is the best we can preserve.
 
+## Disclaimer
+
+This dataset is provided **for research and modeling only**. The AirNow
+portion (U.S. EPA / Environment Canada) consists of **preliminary data
+that has not been fully verified or validated and is subject to change**.
+
+Do **not** use this dataset for regulatory, legal, health, or safety
+decisions. The U.S. EPA, the AirNow program, Environment Canada,
+AirGradient, and OpenAQ do **not** endorse this dataset or any product
+derived from it. The data is provided "as is", without warranty.
+
 ## License & attribution
 
 Aggregated dataset: **CC-BY-4.0**. Upstream sources retain their own terms — see [ATTRIBUTION.md](./ATTRIBUTION.md).

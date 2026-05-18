@@ -2,6 +2,16 @@
 
 This dataset is aggregated from multiple sources via [OpenAQ](https://openaq.org/), each under its own license.
 
+## Disclaimer
+
+AirNow observations (U.S. EPA / Environment Canada) are **preliminary
+and not fully verified or validated** — they are subject to change. This
+dataset is for **research and modeling only**; it is **not** for
+regulatory, legal, health, or safety decisions. The U.S. EPA, the AirNow
+program, Environment Canada, AirGradient, and OpenAQ do **not** endorse
+this dataset or any product derived from it. Provided "as is", without
+warranty. Source data values are redistributed unaltered.
+
 ## Required attribution
 
 When using this dataset, the following attribution must appear in any derived product, publication, or distribution:
