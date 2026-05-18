@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this dataset, please cite it using the metadata below."
+type: dataset
+title: "Air Quality Dataset — Toronto, New York City & Chicago (hourly PM2.5)"
+authors:
+  - name: "Polar Bear Express"
+version: "2026.05"
+date-released: "2026-05-18"
+license: CC-BY-4.0
+url: "https://github.com/polar-bear-express/pbx-air-quality-dataset"
+repository-code: "https://github.com/polar-bear-express/pbx-air-quality-dataset"
+keywords:
+  - air quality
+  - PM2.5
+  - time series
+  - forecasting
+  - OpenAQ
+  - AirNow
+  - AirGradient
+# doi: 10.5281/zenodo.XXXXXXX  # filled in once a release is archived on Zenodo
