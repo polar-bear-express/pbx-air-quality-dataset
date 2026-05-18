@@ -2,14 +2,15 @@
 
 Hourly air-quality readings for **Toronto, New York City, and Chicago** — PM2.5
 plus co-pollutants (PM10, NO2, SO2, CO, O3) — joined with **HRRR meteorology**
-(boundary-layer height, wind, temperature, humidity, pressure). Aggregated from
-public sources via [OpenAQ](https://openaq.org/) and [NOAA HRRR](https://rapidrefresh.noaa.gov/hrrr/).
+(boundary-layer height, wind, temperature, humidity, pressure) and **NOAA HMS
+wildfire-smoke** coverage. Aggregated from public sources via [OpenAQ](https://openaq.org/),
+[NOAA HRRR](https://rapidrefresh.noaa.gov/hrrr/), and [NOAA HMS](https://www.ospo.noaa.gov/products/land/hms.html).
 
 Built for training short-horizon air-quality prediction models. The pollutant
-drivers and meteorology are included precisely because PM2.5 history alone only
-gets you a persistence baseline — boundary-layer height, wind, and co-pollutants
-are what let a model actually beat it. Released under CC-BY-4.0; see
-[ATTRIBUTION.md](./ATTRIBUTION.md) for required upstream credits.
+drivers, meteorology, and smoke are included precisely because PM2.5 history
+alone only gets you a persistence baseline — boundary-layer height, wind,
+co-pollutants, and upwind smoke are what let a model actually beat it. Released
+under CC-BY-4.0; see [ATTRIBUTION.md](./ATTRIBUTION.md) for required upstream credits.
 
 Maintained by Polar Bear Express.
 
@@ -17,19 +18,21 @@ Maintained by Polar Bear Express.
 
 This is the trust anchor for the dataset: **nothing here is hand-curated or fabricated.** Every reading is rebuilt from public, independently accessible sources by the scripts checked into this repo. You can re-run them yourself and confirm the output matches, byte for byte, what is committed.
 
-The raw measurements come from three public archives:
+The raw measurements come from four public archives:
 
 - **OpenAQ S3 archive** (`https://openaq-data-archive.s3.amazonaws.com/`) — the keyless public mirror that hosts the daily air-quality CSVs.
 - **OpenAQ v3 API** (`https://api.openaq.org/v3`) — used only to discover which sensor locations are active in each city's bounding box (a free API key, available at <https://explore.openaq.org/register>, is needed for this discovery step).
 - **NOAA HRRR** on the AWS Open Data bucket (`s3://noaa-hrrr-bdp-pds/`) — the keyless public mirror of the High-Resolution Rapid Refresh model, source of the meteorology.
+- **NOAA HMS** smoke-polygon archive (`https://satepsanone.nesdis.noaa.gov/.../HMS/Smoke_Polygons/`) — keyless daily shapefiles of observed wildfire smoke, source of the smoke layer.
 
-The pipeline is six real scripts, each doing exactly one job:
+The pipeline is seven real scripts, each doing exactly one job:
 
 | Script | What it does |
 |---|---|
 | [`scripts/pull.py`](./scripts/pull.py) | Discovers active AirNow + AirGradient monitors in the TOR/NYC/CHI bounding boxes via the OpenAQ v3 API — every location measuring PM2.5, PM10, NO2, SO2, CO, or O3 — then downloads every daily CSV from the OpenAQ S3 archive into `data/hourly/`. Idempotent — skips files already present at the same size — and rebuilds `manifest.csv` from what is on disk. |
-| [`scripts/pull_hrrr.py`](./scripts/pull_hrrr.py) | Downloads NOAA HRRR surface analysis (GRIB byte-range subset) and extracts boundary-layer height, 10 m wind, 2 m temperature/humidity, and surface pressure at every monitor location into `data/met/`. Idempotent; takes a `--start/--end` window for backfilling. |
-| [`scripts/build_dataset.py`](./scripts/build_dataset.py) | Joins air quality with meteorology and writes the two ML-ready Parquet tables per city — `{CITY}.parquet` (per-sensor long) and `{CITY}_hourly.parquet` (city-hour wide) — into `data/parquet/`. |
+| [`scripts/pull_hrrr.py`](./scripts/pull_hrrr.py) | Downloads NOAA HRRR surface analysis (GRIB byte-range subset) and extracts boundary-layer height, 10 m wind, 2 m temperature/humidity, and surface pressure at every monitor location into `data/met/`. Multiprocessing, idempotent; takes a `--start/--end` window for backfilling. |
+| [`scripts/pull_hms.py`](./scripts/pull_hms.py) | Downloads NOAA HMS daily smoke-plume shapefiles and computes, per city per day, smoke overhead + density and whether smoke lies within 100/300/500 km (plus distance + bearing to the nearest plume) into `data/smoke/`. Idempotent. |
+| [`scripts/build_dataset.py`](./scripts/build_dataset.py) | Joins air quality + meteorology + smoke and engineers lag/rolling/calendar/upwind features, writing the two ML-ready Parquet tables per city — `{CITY}.parquet` (per-sensor long) and `{CITY}_hourly.parquet` (city-hour wide) — into `data/parquet/`. |
 | [`scripts/consolidate.py`](./scripts/consolidate.py) | (Legacy) Reads all daily gzipped CSVs and writes one typed, datetime-sorted Parquet file per city per provider into `data/parquet/`. Kept for backward compatibility. |
 | [`scripts/correlate.py`](./scripts/correlate.py) | Fits per-city OLS regressions between AirGradient and AirNow hourly medians and writes the coefficients, Pearson r, RMSE, and per-concentration-bucket residuals to `harmonization/ag-vs-airnow.json`. |
 | [`scripts/load.py`](./scripts/load.py) | Convenience loader: one-line `pd.read_parquet` of an ML-ready table plus a coverage summary. |
@@ -39,7 +42,8 @@ To re-derive the whole dataset from scratch:
 ```bash
 export OPENAQ_API_KEY=...          # free at https://explore.openaq.org/register
 python3 scripts/pull.py            # rebuilds data/hourly/ + manifest.csv from public sources
-python3 scripts/pull_hrrr.py       # pulls HRRR meteorology into data/met/ (see note below)
+python3 scripts/pull_hrrr.py --start 2018-01-01 --end <today>   # HRRR meteorology -> data/met/
+python3 scripts/pull_hms.py        # HMS wildfire smoke -> data/smoke/
 python3 scripts/build_dataset.py   # builds ML-ready data/parquet/{CITY}*.parquet tables
 python3 scripts/consolidate.py     # (legacy) per-provider parquet files
 python3 scripts/correlate.py       # rebuilds harmonization/ag-vs-airnow.json
@@ -47,12 +51,11 @@ python3 scripts/correlate.py       # rebuilds harmonization/ag-vs-airnow.json
 
 Because the upstream archives are public and the scripts are short, anyone can independently reproduce this dataset and confirm it was not altered or invented.
 
-> **Note on meteorology coverage.** `pull_hrrr.py` defaults to the most recent
-> 7 days — a fast, verifiable sample. The committed `data/met/` is that sample.
-> The full 2018→present HRRR backfill is hundreds of GB of downloads and runs
-> for many hours; run `python3 scripts/pull_hrrr.py --start 2018-01-01 --end <today>`
-> to build it. The meteorology columns in the ML-ready tables are populated
-> wherever `data/met/` has coverage and left null elsewhere.
+> **Note on the HRRR backfill.** The full 2018→present meteorology backfill
+> streams a few hundred GB (deleted as it goes — peak disk stays small) and runs
+> for several hours. `pull_hrrr.py` is idempotent and multiprocessing: completed
+> days are skipped, so it safely resumes after an interruption. Without `--start`
+> it pulls only the most recent week.
 
 ## What's in here
 
@@ -71,6 +74,12 @@ direction), 2 m temperature, 2 m relative humidity, surface pressure. These are
 the drivers short-horizon PM2.5 forecasters need — boundary-layer height and
 wind in particular.
 
+**Wildfire smoke** — daily, from the NOAA HMS smoke-plume analysis: for each
+city, whether smoke is overhead and its density, whether smoke lies within
+100/300/500 km, and the distance + bearing to the nearest plume. Because smoke
+is wind-transported, *upwind* smoke is what predicts a city's air quality before
+it arrives — the ring/distance fields exist to capture that.
+
 `manifest.csv` lists every monitor with its coordinates, the pollutants it
 measures, and its date range.
 
@@ -81,6 +90,7 @@ The two air-quality source types are intentionally kept separate. AirNow is regu
 ```
 data/hourly/{city}/{provider}/{locationid}/{YYYYMMDD}.csv.gz   air quality (raw)
 data/met/{city}/{YYYYMMDD}.csv.gz                              meteorology (raw)
+data/smoke/{city}.csv                                          wildfire smoke (raw, daily)
 data/parquet/{CITY}.parquet            ML-ready — per-sensor long table
 data/parquet/{CITY}_hourly.parquet     ML-ready — city-hour wide table
 ```
@@ -103,35 +113,48 @@ location_id,datetime,lat,lon,met_pblh,met_wind_u,met_wind_v,met_temp,met_rh,met_
 
 ## The ML-ready tables — start here
 
-[`scripts/build_dataset.py`](./scripts/build_dataset.py) joins air quality with
-meteorology into two committed Parquet tables per city. **These are what you
-train on.**
+[`scripts/build_dataset.py`](./scripts/build_dataset.py) joins air quality +
+meteorology + smoke and engineers the derived features a forecaster needs,
+writing two committed Parquet tables per city. **These are what you train on.**
 
-**`data/parquet/{CITY}_hourly.parquet` — city-hour wide.** One row per hour:
-city-median `pm25, pm10, no2, so2, co, o3` and city-mean meteorology. The
-ready-to-go baseline table for LightGBM / LSTM forecasters.
+**`data/parquet/{CITY}_hourly.parquet` — city-hour wide.** One row per hour on a
+complete, gap-free hourly index. The ready-to-go table for LightGBM / LSTM
+forecasters. Columns:
+
+| Group | Columns |
+|---|---|
+| keys | `datetime`, `city` |
+| pollutants (city-median) | `pm25, pm10, no2, so2, co, o3` |
+| meteorology (city-mean) | `met_pblh, met_wind_speed, met_wind_dir, met_temp, met_rh, met_pressure` |
+| smoke | `smoke_overhead, smoke_density, smoke_density_rank, smoke_within_100km, smoke_within_300km, smoke_within_500km, smoke_nearest_km, smoke_nearest_bearing` |
+| smoke × wind | `smoke_upwind` — cos(wind direction − bearing to nearest smoke): +1 = smoke directly upwind (incoming), −1 = downwind |
+| PM2.5 lags | `pm25_lag1, pm25_lag2, pm25_lag3, pm25_lag6, pm25_lag12, pm25_lag24` |
+| PM2.5 rolling means | `pm25_roll6, pm25_roll24` |
+| calendar | `hour, dayofweek, month, is_weekend` |
 
 ```python
 import pandas as pd
 df = pd.read_parquet('data/parquet/CHI_hourly.parquet')
-# columns: datetime, city, pm25, pm10, no2, so2, co, o3,
-#          met_pblh, met_wind_speed, met_wind_dir, met_temp, met_rh, met_pressure
 ```
 
 **`data/parquet/{CITY}.parquet` — per-sensor long.** One row per (sensor, hour):
-a single pollutant reading plus the meteorology at that sensor's location. The
-source-of-truth table for spatial / graph models, where each monitor is a node.
-
-```python
-df = pd.read_parquet('data/parquet/NYC.parquet')
-# columns: datetime, city, location_id, sensors_id, location, provider,
-#          lat, lon, parameter, units, value, met_pblh, met_wind_speed,
-#          met_wind_dir, met_temp, met_rh, met_pressure
-```
+a single pollutant reading plus the meteorology and smoke at that monitor's
+location. The source-of-truth table for spatial / graph models, where each
+monitor is a node. Columns: `datetime, city, location_id, sensors_id, location,
+provider, lat, lon, parameter, units, value`, the six `met_*` fields, the eight
+`smoke_*` fields, and `hour, dayofweek, month`.
 
 [`scripts/load.py`](./scripts/load.py) loads either and prints a summary:
 `python3 scripts/load.py CHI hourly` or `python3 scripts/load.py NYC long`.
 Wind direction is meteorological — the compass bearing the wind blows *from*.
+
+**Baseline.** [`examples/baseline_forecast.py`](./examples/baseline_forecast.py)
+trains a gradient-boosted PM2.5 forecaster on the hourly table and benchmarks it
+against the naive persistence baseline (forecast = last observed value) at +1 h
+and +6 h lead times — a reference number to beat. At +6 h it cuts RMSE ~23%
+below persistence; +1 h is the genuinely hard regime where persistence is very
+strong. Autoregressive lags and meteorology dominate the feature importance, as
+the literature predicts.
 
 > The older per-provider files (`data/parquet/{city}_{provider}.parquet`, from
 > [`scripts/consolidate.py`](./scripts/consolidate.py)) are still produced for
@@ -189,8 +212,9 @@ Re-run as needed. The scripts skip files already present at the same size.
 4. **Sparse offline windows** — sensors drop out for days/weeks at a time. Forward-fill carefully; better to drop than fabricate.
 5. **Occasional sensor malfunctions** (e.g., AirGradient values >500 μg/m³ in clean air) — `scripts/correlate.py` filters >500 μg/m³ by default; you may want stricter limits.
 6. **No row-level contributor attribution** — OpenAQ strips AirGradient's `publicContributorName` field in the S3 export. Network-level attribution to AirGradient is the best we can preserve.
-7. **Meteorology coverage is partial** — `data/met/` ships a recent HRRR sample (see the note in *Reproducible*). The `met_*` columns are null outside that window until you run the full backfill. Check coverage with `python3 scripts/load.py <CITY> hourly` before relying on them.
+7. **A small fraction of meteorology hours are missing** — HRRR has occasional archive gaps and a few fetches fail; those individual hours are left null in `data/met/` and the `met_*` columns rather than fabricated. Expect ~4% of hours null. Check coverage with `python3 scripts/load.py <CITY> hourly`.
 8. **Co-pollutant monitors are separate locations** — each OpenAQ location measures one pollutant, so NO2/O3/etc. come from different sites than PM2.5. The per-sensor table keeps them as distinct rows; the city-hour table aggregates each pollutant across that city's monitors. There is no single co-located multi-pollutant station.
+9. **Smoke is a daily product** — NOAA HMS publishes one smoke analysis per day, so every `smoke_*` field is constant across the 24 hours of a date. It is a city-scale signal, not a per-sensor or sub-daily one.
 
 ## Disclaimer
 
@@ -209,4 +233,4 @@ Aggregated dataset: **CC-BY-4.0**. Upstream sources retain their own terms — s
 
 If you publish work using this dataset, please cite:
 
-> Hourly PM2.5 dataset for Toronto, New York City, and Chicago. Sourced via OpenAQ. Original providers: U.S. EPA AirNow, Environment Canada, AirGradient.
+> Hourly air-quality dataset (PM2.5 + co-pollutants, meteorology, and wildfire smoke) for Toronto, New York City, and Chicago. Sourced via OpenAQ, NOAA HRRR, and NOAA HMS. Original providers: U.S. EPA AirNow, Environment Canada, AirGradient, NOAA/NCEP, NOAA/NESDIS.

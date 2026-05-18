@@ -1,8 +1,10 @@
 # Data Attribution
 
 This dataset is aggregated from multiple sources, each under its own license:
-air-quality observations via [OpenAQ](https://openaq.org/), and meteorology from
-the [NOAA HRRR](https://rapidrefresh.noaa.gov/hrrr/) model.
+air-quality observations via [OpenAQ](https://openaq.org/), meteorology from the
+[NOAA HRRR](https://rapidrefresh.noaa.gov/hrrr/) model, and wildfire-smoke
+coverage from the [NOAA HMS](https://www.ospo.noaa.gov/products/land/hms.html)
+smoke-polygon analysis.
 
 ## Disclaimer
 
@@ -22,7 +24,7 @@ When using this dataset, the following attribution must appear in any derived pr
 >
 > Regulatory data: **U.S. EPA AirNow** (https://www.airnow.gov/) — U.S. federal public domain. **Environment Canada** (https://weather.gc.ca/) — Open Government Licence Canada 2.0 — https://open.canada.ca/en/open-government-licence-canada
 >
-> Meteorology: **NOAA HRRR** (https://rapidrefresh.noaa.gov/hrrr/) — U.S. federal public domain.
+> Meteorology: **NOAA HRRR** (https://rapidrefresh.noaa.gov/hrrr/) — U.S. federal public domain. Wildfire smoke: **NOAA HMS** (https://www.ospo.noaa.gov/products/land/hms.html) — U.S. federal public domain.
 
 ## Sources
 
@@ -53,6 +55,13 @@ When using this dataset, the following attribution must appear in any derived pr
 - **Attribution**: Not legally required; courtesy citation appreciated
 - **Source**: NOAA/NCEP, accessed via the AWS Open Data registry mirror (`s3://noaa-hrrr-bdp-pds/`)
 - More info: https://rapidrefresh.noaa.gov/hrrr/, https://registry.opendata.aws/noaa-hrrr-pds/
+
+### NOAA HMS (wildfire smoke)
+- **Coverage**: daily smoke-plume polygons over North America, reduced to per-city per-day smoke overhead / density and distance to the nearest plume (Jan 2018 → present)
+- **License**: U.S. federal **public domain** (works of the U.S. Government carry no copyright)
+- **Attribution**: Not legally required; courtesy citation appreciated
+- **Source**: NOAA/NESDIS Hazard Mapping System, https://satepsanone.nesdis.noaa.gov/pub/FIRE/web/HMS/Smoke_Polygons/
+- More info: https://www.ospo.noaa.gov/products/land/hms.html
 
 ### OpenAQ (aggregator + delivery)
 - **Role**: Mirrors all upstream providers and exposes them through a unified API + S3 archive
