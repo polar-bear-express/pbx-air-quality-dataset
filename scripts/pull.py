@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Idempotent pull of hourly PM2.5 from OpenAQ S3 archive.
+"""Idempotent pull of hourly air-quality data from the OpenAQ S3 archive.
+
+Pulls PM2.5 plus co-pollutants (PM10, NO2, SO2, CO, O3) for every AirNow /
+AirGradient monitor in the TOR/NYC/CHI bounding boxes. Each OpenAQ location
+measures a single parameter, so co-pollutants simply add more locations; the
+on-disk layout is unchanged (the `parameter` column inside each CSV says which).
 
 Re-run to fetch new daily files. Existing files are skipped if same size.
 
@@ -21,6 +26,9 @@ CITY_BBOX = {
     'CHI': '-87.94,41.64,-87.52,42.02',
 }
 WANT_PROVIDERS = {'AirGradient', 'AirNow'}
+# Pollutants we keep. Names match OpenAQ's parameter.name field, so no need to
+# hardcode parameter IDs — we filter each location by what its sensors measure.
+WANT_PARAMS = ('pm25', 'pm10', 'no2', 'so2', 'co', 'o3')
 ACTIVE_CUTOFF = (dt.datetime.utcnow() - dt.timedelta(days=14)).replace(tzinfo=dt.timezone.utc)
 
 
@@ -29,23 +37,38 @@ def discover_targets():
     if not api_key:
         sys.exit('Set OPENAQ_API_KEY (sign up at https://explore.openaq.org/register)')
     targets = []
+    want = set(WANT_PARAMS)
     for city, bbox in CITY_BBOX.items():
-        url = f'https://api.openaq.org/v3/locations?bbox={bbox}&parameters_id=2&limit=200'
-        req = urllib.request.Request(url, headers={'X-API-Key': api_key})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            data = json.load(r)
-        for loc in data.get('results') or []:
-            prov = (loc.get('provider') or {}).get('name')
-            if prov not in WANT_PROVIDERS: continue
-            last = (loc.get('datetimeLast') or {}).get('utc') or ''
-            try:
-                if last and dt.datetime.fromisoformat(last.replace('Z', '+00:00')) >= ACTIVE_CUTOFF:
-                    coords = loc.get('coordinates') or {}
-                    targets.append({
-                        'city': city, 'provider': prov, 'locationid': loc['id'],
-                        'name': loc.get('name'), 'lat': coords.get('latitude'), 'lng': coords.get('longitude'),
-                    })
-            except ValueError: pass
+        page = 1
+        while True:
+            url = f'https://api.openaq.org/v3/locations?bbox={bbox}&limit=1000&page={page}'
+            req = urllib.request.Request(url, headers={'X-API-Key': api_key})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = json.load(r)
+            results = data.get('results') or []
+            for loc in results:
+                prov = (loc.get('provider') or {}).get('name')
+                if prov not in WANT_PROVIDERS: continue
+                # Keep only the target pollutants this location actually measures.
+                params = sorted({(s.get('parameter') or {}).get('name')
+                                 for s in (loc.get('sensors') or [])} & want)
+                if not params: continue
+                last = (loc.get('datetimeLast') or {}).get('utc') or ''
+                try:
+                    fresh = last and dt.datetime.fromisoformat(
+                        last.replace('Z', '+00:00')) >= ACTIVE_CUTOFF
+                except ValueError:
+                    fresh = False
+                if not fresh: continue
+                coords = loc.get('coordinates') or {}
+                targets.append({
+                    'city': city, 'provider': prov, 'locationid': loc['id'],
+                    'name': loc.get('name'), 'lat': coords.get('latitude'),
+                    'lng': coords.get('longitude'), 'parameters': ','.join(params),
+                })
+            if len(results) < 1000:
+                break
+            page += 1
     return targets
 
 
@@ -124,11 +147,11 @@ def main():
         d = DATA / t['city'] / t['provider'].lower() / str(t['locationid'])
         days = sorted(p.stem for p in d.glob('*.csv.gz')) if d.exists() else []
         rows.append([t['city'], t['provider'], t['locationid'], t['name'],
-                     t['lat'], t['lng'], len(days),
+                     t['lat'], t['lng'], t.get('parameters', ''), len(days),
                      days[0] if days else '', days[-1] if days else ''])
     with open(MANIFEST, 'w', newline='') as f:
         w = csv.writer(f)
-        w.writerow(['city','provider','locationid','name','lat','lng','n_days','first_day','last_day'])
+        w.writerow(['city','provider','locationid','name','lat','lng','parameters','n_days','first_day','last_day'])
         w.writerows(sorted(rows))
     print(f'wrote manifest: {MANIFEST}', flush=True)
 

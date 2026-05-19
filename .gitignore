@@ -7,6 +7,10 @@ venv/
 .env.*
 *.swp
 
+# Local operational wrapper for the launchd HRRR-backfill agent — machine-
+# specific, not part of the dataset.
+/run_hrrr.sh
+
 # Consolidated Parquet files are committed (see data/parquet/).
 # Regenerate locally with: python3 scripts/consolidate.py
 
